@@ -22,10 +22,10 @@ WORKDIR /app
 COPY . /app
 
 # Install browser-use
-RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+RUN \
     uv sync --all-extras --locked --no-dev --compile-bytecode
 
 USER "$BROWSERUSE_USER"
-VOLUME "$DATA_DIR"
+# VOLUME "$DATA_DIR"  # Railway does not support docker VOLUME; attach a Railway Volume at $DATA_DIR instead
 EXPOSE 9242 9222
 ENTRYPOINT ["browser-use"]

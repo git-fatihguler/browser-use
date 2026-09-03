@@ -75,11 +75,9 @@ ENV CODE_DIR=/app \
 # Build shell config
 SHELL ["/bin/bash", "-o", "pipefail", "-o", "errexit", "-o", "errtrace", "-o", "nounset", "-c"] 
 
-# Force apt to leave downloaded binaries in /var/cache/apt (massively speeds up Docker builds)
-RUN echo 'Binary::apt::APT::Keep-Downloaded-Packages "1";' > /etc/apt/apt.conf.d/99keep-cache \
-    && echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/99no-intall-recommends \
-    && echo 'APT::Install-Suggests "0";' > /etc/apt/apt.conf.d/99no-intall-suggests \
-    && rm -f /etc/apt/apt.conf.d/docker-clean
+# Railway builds have no BuildKit cache mounts, so let apt clean up its downloads (keeps the image small)
+RUN echo 'APT::Install-Recommends "0";' > /etc/apt/apt.conf.d/99no-intall-recommends \
+    && echo 'APT::Install-Suggests "0";' > /etc/apt/apt.conf.d/99no-intall-suggests
 
 # Print debug info about build and save it to disk, for human eyes only, not used by anything else
 RUN (echo "[i] Docker build for Browser Use $(cat /VERSION.txt) starting..." \
@@ -114,7 +112,7 @@ RUN echo "[*] Setting up $BROWSERUSE_USER user uid=${DEFAULT_PUID}..." \
     # https://docs.linuxserver.io/general/understanding-puid-and-pgid
 
 # Install base apt dependencies (adding backports to access more recent apt updates)
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$TARGETVARIANT \
+RUN \
     echo "[+] Installing APT base system dependencies for $TARGETPLATFORM..." \
 #     && echo 'deb https://deb.debian.org/debian bookworm-backports main contrib non-free' > /etc/apt/sources.list.d/backports.list \
     && mkdir -p /etc/apt/keyrings \
@@ -144,7 +142,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 COPY pyproject.toml uv.lock* /app/
 
-RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$TARGETVARIANT \
+RUN \
     echo "[+] Setting up venv using uv in $VENV_DIR..." \
     && ( \
      which uv && uv --version \
@@ -154,7 +152,7 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$T
     ) | tee -a /VERSION.txt
 
 # Install Chromium browser directly from system packages
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$TARGETVARIANT \
+RUN \
     echo "[+] Installing chromium browser from system packages..." \
     && apt-get update -qq \
     && apt-get install -y --no-install-recommends \
@@ -174,7 +172,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-$TARGETARCH$T
         && echo -e '\n\n' \
     ) | tee -a /VERSION.txt
 
-RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$TARGETVARIANT \
+RUN \
      echo "[+] Installing browser-use pip sub-dependencies..." \
      && ( \
         uv sync --all-extras --no-dev --no-install-project \
@@ -185,7 +183,7 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$T
 COPY . /app
 
 # Install the browser-use package and all of its optional dependencies
-RUN --mount=type=cache,target=/root/.cache,sharing=locked,id=cache-$TARGETARCH$TARGETVARIANT \
+RUN \
      echo "[+] Installing browser-use pip library from source..." \
      && ( \
         uv sync --all-extras --locked --no-dev \
@@ -203,7 +201,7 @@ RUN mkdir -p "$DATA_DIR/profiles/default" \
 
 
 USER "$BROWSERUSE_USER"
-VOLUME "$DATA_DIR"
+# VOLUME "$DATA_DIR"  # Railway does not support docker VOLUME; attach a Railway Volume at $DATA_DIR instead
 EXPOSE 9242
 EXPOSE 9222
 
