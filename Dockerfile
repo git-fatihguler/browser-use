@@ -208,4 +208,10 @@ EXPOSE 9222
 # HEALTHCHECK --interval=30s --timeout=20s --retries=15 \
 #     CMD curl --silent 'http://localhost:8000/health/' | grep -q 'OK'
 
-ENTRYPOINT ["browser-use"]
+EXPOSE 8000
+
+# Railway runs this image as a long-lived service, and its custom start command is appended to
+# ENTRYPOINT, so the CLI entrypoint would swallow it. Start the HTTP wrapper instead; the CLI is
+# still reachable via `docker run --entrypoint browser-use ...`.
+ENTRYPOINT []
+CMD ["python", "/app/railway_server.py"]

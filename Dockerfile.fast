@@ -28,4 +28,10 @@ RUN \
 USER "$BROWSERUSE_USER"
 # VOLUME "$DATA_DIR"  # Railway does not support docker VOLUME; attach a Railway Volume at $DATA_DIR instead
 EXPOSE 9242 9222
-ENTRYPOINT ["browser-use"]
+EXPOSE 8000
+
+# Railway runs this image as a long-lived service, and its custom start command is appended to
+# ENTRYPOINT, so the CLI entrypoint would swallow it. Start the HTTP wrapper instead; the CLI is
+# still reachable via `docker run --entrypoint browser-use ...`.
+ENTRYPOINT []
+CMD ["python", "/app/railway_server.py"]
