@@ -334,6 +334,21 @@ _EMPTY_STDIN_MESSAGE = """browser-use received empty stdin. This CLI executes Py
   print(page_info())
   PY"""
 
+_CONTAINER_SERVICE_HINT = """
+This looks like a container service start command (IN_DOCKER and PORT are set): stdin
+will always be empty here, so the service exits and restart-loops. This image already
+starts an HTTP wrapper by default; clear the custom start command that runs
+`browser-use`, or set it to:
+  python /app/railway_server.py"""
+
+
+def _container_service_hint() -> str | None:
+	import os
+
+	if os.environ.get('IN_DOCKER') and os.environ.get('PORT'):
+		return _CONTAINER_SERVICE_HINT
+	return None
+
 
 def _command_name(args: list[str]) -> str:
 	if '--cli-mcp' in args:
@@ -384,6 +399,9 @@ def _dispatch(args: list[str]) -> tuple[int | None, str]:
 		code = sys.stdin.read()
 		if not code.strip():
 			print(_EMPTY_STDIN_MESSAGE, file=sys.stderr)
+			hint = _container_service_hint()
+			if hint:
+				print(hint, file=sys.stderr)
 			return 1, 'run'
 		sys.stdin = StringIO(code)
 

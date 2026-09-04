@@ -27,6 +27,7 @@ dist/
 *.csv
 *.json
 !/server.json
+!/railway.json
 *.jsonl
 *.log
 *.bak

@@ -212,6 +212,7 @@ EXPOSE 8000
 
 # Railway runs this image as a long-lived service, and its custom start command is appended to
 # ENTRYPOINT, so the CLI entrypoint would swallow it. Start the HTTP wrapper instead; the CLI is
-# still reachable via `docker run --entrypoint browser-use ...`.
+# still reachable via `docker run --entrypoint browser-use ...`. A dashboard-configured start
+# command still overrides this CMD — railway.json pins the correct one via config-as-code.
 ENTRYPOINT []
 CMD ["python", "/app/railway_server.py"]
