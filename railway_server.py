@@ -3,6 +3,7 @@
 The bundled `browser-use` CLI reads Python from stdin and the MCP server speaks stdio, so neither
 stays up as a web service. This module exposes the Agent over HTTP instead:
 
+	GET  /                                -> minimal HTML panel to submit tasks from a browser
 	GET  /health                          -> {"ok": true, "busy": false}
 	POST /run  {"task": "...", ...}       -> {"result": "...", "success": true, ...}
 
@@ -39,6 +40,95 @@ MAX_BODY_BYTES = 64 * 1024
 
 # One agent at a time: each run drives its own Chromium, which is the memory hog in this container.
 _run_lock = threading.Lock()
+
+# Served at GET / so a browser visit gets a usable panel instead of a 404. The API token is typed
+# into the form by the operator and only lives in that browser tab; it is never embedded here.
+_INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>browser-use</title>
+<style>
+:root { color-scheme: dark; }
+body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: #0f1115; color: #e6e6e6; display: flex; justify-content: center; }
+main { width: min(680px, 92vw); padding: 48px 0 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h1 span { color: #f97316; }
+p.sub { color: #9aa0a6; margin: 0 0 8px; }
+#status { font-size: 13px; margin-bottom: 24px; }
+.ok { color: #4ade80; } .bad { color: #f87171; }
+label { display: block; font-size: 13px; color: #9aa0a6; margin: 16px 0 6px; }
+input, textarea { width: 100%; box-sizing: border-box; background: #181b22; color: #e6e6e6; border: 1px solid #2a2f3a; border-radius: 8px; padding: 10px 12px; font: inherit; }
+textarea { min-height: 96px; resize: vertical; }
+input:focus, textarea:focus { outline: none; border-color: #f97316; }
+button { margin-top: 20px; background: #f97316; border: none; color: #111; font: 600 15px system-ui, sans-serif; padding: 10px 22px; border-radius: 8px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+pre { background: #181b22; border: 1px solid #2a2f3a; border-radius: 8px; padding: 14px; white-space: pre-wrap; word-break: break-word; margin-top: 20px; min-height: 40px; }
+</style>
+</head>
+<body>
+<main>
+<h1><span>browser-use</span> task runner</h1>
+<p class="sub">Runs one browser agent task at a time on this container.</p>
+<div id="status">checking health&hellip;</div>
+<form id="form">
+<label for="token">API token (the BU_API_TOKEN service variable)</label>
+<input id="token" type="password" autocomplete="off" placeholder="Bearer token">
+<label for="task">Task</label>
+<textarea id="task" placeholder="Go to news.ycombinator.com and list the top 3 headlines"></textarea>
+<label for="steps">Max steps</label>
+<input id="steps" type="number" value="25" min="1" max="100">
+<button id="go" type="submit">Run task</button>
+</form>
+<pre id="out">Result will appear here.</pre>
+</main>
+<script>
+const statusEl = document.getElementById('status');
+const out = document.getElementById('out');
+const go = document.getElementById('go');
+async function health() {
+	try {
+		const res = await fetch('/health');
+		const data = await res.json();
+		statusEl.innerHTML = data.busy
+			? '<span class="bad">&#9679;</span> busy: a task is running'
+			: '<span class="ok">&#9679;</span> healthy and idle';
+	} catch (err) {
+		statusEl.innerHTML = '<span class="bad">&#9679;</span> health check failed';
+	}
+}
+health();
+setInterval(health, 5000);
+document.getElementById('form').addEventListener('submit', async (event) => {
+	event.preventDefault();
+	const body = {
+		task: document.getElementById('task').value,
+		max_steps: parseInt(document.getElementById('steps').value, 10) || 25,
+	};
+	go.disabled = true;
+	out.textContent = 'Running... this can take a few minutes.';
+	try {
+		const res = await fetch('/run', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': 'Bearer ' + document.getElementById('token').value,
+			},
+			body: JSON.stringify(body),
+		});
+		out.textContent = JSON.stringify(await res.json(), null, 2);
+	} catch (err) {
+		out.textContent = 'Request failed: ' + err;
+	} finally {
+		go.disabled = false;
+		health();
+	}
+});
+</script>
+</body>
+</html>
+"""
 
 
 def _log_bind_target(port: int) -> str:
@@ -103,15 +193,27 @@ class Handler(BaseHTTPRequestHandler):
 			return None
 		return payload if isinstance(payload, dict) else None
 
+	def _send_html(self, status: int, html: str) -> None:
+		body = html.encode('utf-8')
+		self.send_response(status)
+		self.send_header('Content-Type', 'text/html; charset=utf-8')
+		self.send_header('Content-Length', str(len(body)))
+		self.end_headers()
+		self.wfile.write(body)
+
 	def do_GET(self) -> None:  # noqa: N802
-		if self.path.split('?')[0] == '/health':
+		path = self.path.split('?')[0]
+		if path == '/':
+			self._send_html(200, _INDEX_HTML)
+			return
+		if path == '/health':
 			self._send_json(200, {'ok': True, 'busy': _run_lock.locked()})
 			return
-		self._send_json(404, {'error': 'not found', 'routes': ['GET /health', 'POST /run']})
+		self._send_json(404, {'error': 'not found', 'routes': ['GET /', 'GET /health', 'POST /run']})
 
 	def do_POST(self) -> None:  # noqa: N802
 		if self.path.split('?')[0] != '/run':
-			self._send_json(404, {'error': 'not found', 'routes': ['GET /health', 'POST /run']})
+			self._send_json(404, {'error': 'not found', 'routes': ['GET /', 'GET /health', 'POST /run']})
 			return
 
 		if not self._authorized():
